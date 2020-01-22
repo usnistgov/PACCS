@@ -1,0 +1,60 @@
+#!/usr/bin/env python
+
+import numpy
+import scipy.optimize
+
+# Add modules to path and import
+import sys
+sys.path.append("../lib")
+from paccs import crystal
+from paccs import potential
+from paccs import minimization
+
+warnings = []
+trial = 0
+skip = 0
+print("Running trials, send Ctrl+C to halt")
+while True:
+    try:
+        trial += 1
+
+        # Generate a random cell
+        dimensions = int(numpy.random.randint(2, 4))
+        atom_types = int(numpy.round(numpy.random.exponential(1)) + 1)
+        atom_counts = [int(numpy.round(numpy.random.exponential(0.5)) + 1) for index in range(atom_types)]
+        vectors = (2 * numpy.random.uniform(size=(dimensions, dimensions))) + 1
+        atom_lists = [numpy.dot(vectors.T, numpy.random.uniform(size=(atom_count, dimensions)).T).T for atom_count in atom_counts]
+        cell = crystal.CellTools.reduce(crystal.Cell(vectors, atom_lists))
+        cell = crystal.CellTools.scale(cell, cell.vectors / (cell.enclosed ** (1.0 / dimensions)))
+
+        # Generate random potentials
+        potentials = {}
+        for i in range(atom_types):
+            for j in range(i, atom_types):
+                potentials[(i, j)] = potential.LennardJonesType(sigma=numpy.random.uniform(0.5, 2), \
+                    epsilon=numpy.random.uniform(0.5, 2), lambda_=numpy.random.uniform(-1, 1), \
+                    n=numpy.random.uniform(6, 36), s=numpy.random.uniform(0.75, 1.5))
+
+        # Compute energies
+        cutoff = numpy.random.uniform(0, 3)
+        energy_slow = crystal.CellTools.energy(cell, potentials, cutoff)
+        energy_fast, jacobian = potential._evaluate_fast(cell, potentials, cutoff)
+        if numpy.isnan(energy_slow) or numpy.isnan(energy_fast) or (energy_slow == 0 and energy_fast == 0):
+            skip += 1
+            continue
+        error = int(numpy.ceil((2 ** 52) * abs(energy_slow - energy_fast) / max(abs(energy_slow), abs(energy_fast))))
+        print("Trial {}: error of {} eps".format(trial, error))
+        if error > 100:
+            print("    Warning: high error ({}%)".format(100 * error / (2. ** 52)))
+            warnings.append((trial, error, energy_slow, energy_fast))
+
+    except KeyboardInterrupt:
+        break
+    except Exception as ex:
+        print("    Something went wrong: {}".format(ex))
+        warnings.append((trial, str(ex), cell, cell.distortion_factor))
+
+for warning in warnings:
+    print("Got a warning on {}: {}, {}, {}".format(*warning))
+print("Executed {} trials".format(trial))
+print("Skipped {} (particles were too close or far, got NaN or 0)".format(skip))

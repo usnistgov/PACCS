@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+
+# Register Ctrl+C handler
+function interrupted() {
+    echo "Build interrupted"
+    rm -f "$CHECK_FILE"
+    exit 3
+}
+trap interrupted SIGINT
+
+# Define constants
+MODULE_NAME="paccs"
+PLATFORM_PATTERN=".*"
+CHECK_FILE=".paccs.buildinprogress"
+
+# By default, perform all tasks
+FEATURE_CYTHON=1
+FEATURE_SPHINX=1
+FEATURE_UNITTEST=1
+
+# By default, don't profile
+CYTHON_PROFILE=False
+
+# Possibly turn off some tasks
+while getopts :vcdup OPTION; do
+    case "$OPTION" in
+        c)
+            FEATURE_CYTHON=0
+            ;;
+        d)
+            FEATURE_SPHINX=0
+            ;;
+        u)
+            FEATURE_UNITTEST=0
+            ;;
+        p)
+            CYTHON_PROFILE=True
+            ;;
+        \?)
+            echo "Accepted options:"
+            echo "    -c  Skip compilation"
+            echo "    -d  Skip documentation generation"
+            echo "    -u  Skip unit testing"
+            echo "    -p  Compile with Cython profiling information"
+            exit 2
+    esac
+done
+
+# Make sure that we are in the current directory
+cd "$(dirname -- "$0")"
+
+# Abort if a build is in progress
+if [ -f "$CHECK_FILE" ]; then
+    echo "Another build is already in progress or did not properly terminate."
+    echo "If you are sure that no other builds are running, remove the file:"
+    echo "    ""$CHECK_FILE"
+    echo "and execute this script again."
+    exit 1
+fi
+
+# Create a check file to prevent multiple builds at once
+touch "$CHECK_FILE"
+
+# Clean
+rm -r sources/Cython
+if [ "$FEATURE_CYTHON" -eq 1 ]; then
+    rm -r lib
+fi
+
+# Move source files to compilation directory
+mkdir -p sources/Cython/"$MODULE_NAME"
+cp sources/"$MODULE_NAME"/*.* sources/Cython/"$MODULE_NAME"/
+    
+# Run compilation feature
+if [ "$FEATURE_CYTHON" -eq 1 ]; then
+    # Check for presence of ccache
+    CC_DEFAULT="gcc"
+    if type ccache >/dev/null 2>&1; then
+        CC_CCACHE="ccache ""$CC_DEFAULT"
+    else
+        CC_CCACHE="$CC_DEFAULT"
+    fi
+
+    # Invoke Cython
+    cat << ___EOF > setup.py
+import Cython.Build
+import distutils.ccompiler
+import distutils.core
+import multiprocessing
+import numpy
+
+distutils.core.setup( \
+    ext_modules=Cython.Build.cythonize("sources/Cython/${MODULE_NAME}/*.pyx", \
+    annotate=True, compiler_directives=dict(embedsignature=True, profile=${CYTHON_PROFILE}, language_level=3), \
+    nthreads=multiprocessing.cpu_count()), \
+    include_dirs=["sources/Cython", numpy.get_include()])
+___EOF
+    CC="$CC_CCACHE" python setup.py build -t temp -b build
+    SUCCESS_CYTHON="$?"
+    rm setup.py
+
+    # Move pure Python modules into place
+    for TARGET in build/*; do
+        for PYTHON_FILE in sources/Cython/"$MODULE_NAME"/*.py; do
+            cp "$PYTHON_FILE" "$TARGET"/"$MODULE_NAME"/"${PYTHON_FILE#sources/Cython/"$MODULE_NAME"/}"
+        done
+    done
+
+    # Make symlink of one (hopefully unique) platform
+    ln -s build/"$(ls build | grep -e "$PLATFORM_PATTERN" | head -1)"/ lib
+fi
+
+# Run documentation feature
+if [ "$FEATURE_SPHINX" -eq 1 ]; then
+    # Make documentation from compiled docstrings
+    cd docs
+    make html
+    SUCCESS_SPHINX="$?"
+    cd ..
+fi
+
+# Run testing feature
+if [ "$FEATURE_UNITTEST" -eq 1 ]; then
+    # Run tests
+    cd tests
+    ./runtests
+    SUCCESS_UNITTEST="$?"
+    cd ..
+fi
+
+# We are done, remove the check file
+rm "$CHECK_FILE"
+
+# Report status
+echo; echo
+OVERALL_STATUS=1
+echo "$MODULE_NAME"" build script finished"
+
+echo -n "Compilation of binaries      "
+if [ "$FEATURE_CYTHON" -eq 0 ]; then
+    echo "SKIPPED"
+else
+    if [ "$SUCCESS_CYTHON" -eq 0 ]; then
+        echo "OK"
+    else
+        OVERALL_STATUS=0
+        echo "FAILED"
+    fi
+fi
+
+echo -n "Documentation generation     "
+if [ "$FEATURE_SPHINX" -eq 0 ]; then
+    echo "SKIPPED"
+else
+    if [ "$SUCCESS_SPHINX" -eq 0 ]; then
+        echo "OK"
+    else
+        OVERALL_STATUS=0
+        echo "FAILED"
+    fi
+fi
+
+echo -n "Unit tests                   "
+if [ "$FEATURE_UNITTEST" -eq 0 ]; then
+    echo "SKIPPED"
+else
+    if [ "$SUCCESS_UNITTEST" -eq 0 ]; then
+        echo "OK"
+    else
+        OVERALL_STATUS=0
+        echo "FAILED"
+    fi
+fi
+
+echo; echo
+if [ "$OVERALL_STATUS" -eq 1 ]; then
+    echo "$MODULE_NAME"" build SUCCEEDED"
+    exit 0
+else
+    echo "$MODULE_NAME"" build FAILED"
+    exit 1
+fi
+echo; echo
+

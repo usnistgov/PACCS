@@ -1,0 +1,9 @@
+cython
+mayavi
+numpy
+plotly
+python-constraint
+scikit-learn
+scipy
+sphinx
+sphinx_rtd_theme

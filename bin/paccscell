@@ -1,0 +1,81 @@
+#!/usr/bin/env python
+
+# Find paccs lib directory
+import os
+bin_directory = os.path.dirname(os.path.realpath(__file__))
+lib_directory = os.path.realpath(os.path.join(bin_directory, "..", "lib"))
+
+# Add to PYTHONPATH
+import sys
+sys.path.append(lib_directory)
+
+# Import modules
+from paccs import *
+
+# Process arguments
+import argparse
+parser = argparse.ArgumentParser(description="Performs basic operations on cells.")
+parser.add_argument("input", action="store", help="Path to a cell file to load.", metavar="path")
+parser.add_argument("-i", "--information", action="store_true", help="Displays information about the cell.")
+parser.add_argument("-t", "--tile", action="store", help="A number or comma-separated list of repeats used to tile the cell.", metavar="repeats")
+parser.add_argument("-R", "--radii", action="store", help="A number or comma-separated list of radii for particle types.", metavar="radii")
+parser.add_argument("-p", "--partials", action="store_true", help="Whether or not to include additional partial periodic images when tiling.")
+parser.add_argument("-r", "--reduce", action="store_true", help="Perform a reduction (cleanup) operation on the cell.")
+parser.add_argument("-c", "--write-cell", action="store", help="Path to write a .cell format file to.", metavar="cellpath")
+parser.add_argument("-x", "--write-xyz", action="store", help="Path to write a .xyz format file to.", metavar="xyzpath")
+parser.add_argument("-l", "--write-lammps", action="store", help="Path to write a LAMMPS format file to.", metavar="lammpspath")
+parser.add_argument("-M", "--visualize-mayavi", action="store_true", help="Runs the Mayavi visualizer.")
+parser.add_argument("-P", "--visualize-plotly", action="store_true", help="Runs the Plotly visualizer.")
+parser.add_argument("-b", "--box", action="store_true", help="Draws a box around the cell in the visualizer.")
+parser.add_argument("-V", "--version", action="version", version="paccs v{} cell utility".format(version.version))
+arguments = parser.parse_args()
+
+# Check arguments
+tile = 1 if arguments.tile is None else [int(value.strip()) for value in arguments.tile.split(",")]
+radii = 1.0 if arguments.radii is None else [float(value.strip()) for value in arguments.radii.split(",")]
+
+# Load the cell
+with open(arguments.input, "r") as cell_file:
+    cell = crystal.CellCodecs.read_cell(cell_file)
+
+# Tile the cell
+if not isinstance(tile, list):
+    tile = [tile] * cell.dimensions
+if not isinstance(radii, list):
+    radii = [radii] * cell.atom_types
+if arguments.reduce:
+    cell = crystal.CellTools.reduce(cell)
+cell = crystal.CellTools.tile(cell, tile, radii if arguments.partials else None)
+
+# Display information
+if arguments.information:
+    print("Dimensions {}".format(cell.dimensions))
+    print("Vectors    {}".format(", ".join("<{}>".format(", ".join(str(component) for component in vector)) for vector in cell.vectors)))
+    print("Enclosed   {}".format(cell.enclosed))
+    print("Surface    {}".format(cell.surface))
+    print("Distortion {}".format(cell.distortion_factor))
+    print("Normals    {}".format(", ".join("<{}>".format(", ".join(str(component) for component in vector)) for vector in cell.normals)))
+    print("Particles  {}".format(", ".join("{} {}".format(cell.atom_count(type_index), cell.name(type_index)) for type_index in range(cell.atom_types))))
+    print("Contacts   {}".format(", ".join("({}-{}: {})".format(cell.name(source_index), cell.name(target_index), cell.contact(source_index, target_index)) \
+        for source_index in range(cell.atom_types) for target_index in range(source_index, cell.atom_types))))
+    if arguments.radii is not None:
+        print("Scale      {}".format(cell.scale_factor(radii)))
+
+# Export
+if arguments.write_cell is not None:
+    with open(arguments.write_cell, "w") as output_file:
+        crystal.CellCodecs.write_cell(cell, output_file)
+if arguments.write_xyz is not None:
+    with open(arguments.write_xyz, "w") as output_file:
+        crystal.CellCodecs.write_xyz(cell, output_file)
+if arguments.write_lammps is not None:
+    with open(arguments.write_lammps, "w") as output_file:
+        crystal.CellCodecs.write_lammps(cell, output_file)
+
+# Visualize
+if arguments.visualize_mayavi and arguments.visualize_plotly:
+    raise ValueError("cannot use both visualizers at once")
+if arguments.visualize_mayavi:
+    visualization.cell_mayavi(cell, [1] * cell.dimensions, radii, supercell_box=arguments.box)
+if arguments.visualize_plotly:
+    visualization.cell_plotly(cell, [1] * cell.dimensions, radii)

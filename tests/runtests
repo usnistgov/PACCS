@@ -1,0 +1,30 @@
+#!/usr/bin/env python
+
+import importlib
+import os
+import sys
+import unittest
+
+results = {}
+
+# Add paccs modules to path
+sys.path.append("../lib")
+
+# Load all test modules and run tests
+for test_file in os.listdir("."):
+    if not (test_file.endswith(".py")):
+        continue
+    test_module = importlib.import_module(test_file[:-len(".py")])
+    results[test_module.__name__] = unittest.main(test_module, exit=False, verbosity=2)
+
+# Display summary of test results
+for name, result in list(results.items()):
+    print("Module {}: {} ({})".format(name, "PASS" if result.result.wasSuccessful() else "FAIL", result.result))
+if all(result.result.wasSuccessful() for result in list(results.values())):
+    print(" === Unit tests PASSED === ")
+    print("If desired, run visual tests at /tests/visualization.py and")
+    print("randomized tests at /tests/randeval for further verification.")
+    sys.exit(0)
+else:
+    print(" === Unit tests FAILED === ")
+    sys.exit(1)

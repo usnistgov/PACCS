@@ -1,0 +1,49 @@
+#!/usr/bin/env python
+
+# Find paccs lib directory
+import os
+bin_directory = os.path.dirname(os.path.realpath(__file__))
+lib_directory = os.path.realpath(os.path.join(bin_directory, "..", "lib"))
+
+# Add to PYTHONPATH
+import sys
+sys.path.append(lib_directory)
+
+# Process arguments
+import argparse
+def get_version():
+    from paccs import version
+    return "paccs v{} interactive shell".format(version.version)
+parser = argparse.ArgumentParser(description="Launches an interactive shell with paccs imported.")
+parser.add_argument("-V", "--version", action="version", version=get_version())
+parser.add_argument("-f", "--force-python", action="store_true", help="Use the Python interactive shell even if IPython is available.")
+parser.add_argument("-t", "--import-top-level", action="store_true", help="Import the top-level paccs module instead of its submodules.")
+arguments = parser.parse_args()
+
+# Import modules
+import numpy
+if arguments.import_top_level:
+    import paccs
+else:
+    from paccs import *
+
+# Clean up after startup work
+del get_version
+del os
+del bin_directory
+del lib_directory
+del sys
+del argparse
+del parser
+
+# Launch interactive shell
+force_python = arguments.force_python
+del arguments
+try:
+    if force_python:
+        raise ImportError
+    from IPython import embed as _pysh___
+    _pysh___()
+except ImportError:
+    from code import interact as _pysh___
+    _pysh___(local=locals())
