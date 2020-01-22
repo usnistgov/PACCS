@@ -1,0 +1,10 @@
+__pycache__/
+*.DS_Store*
+*.py[cdo]
+.sphinx_document_all
+*ipynb_checkpoints*
+/build/
+/docs/build/
+/lib
+/sources/Cython/
+/temp/
